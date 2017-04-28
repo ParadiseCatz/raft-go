@@ -619,46 +619,34 @@ func sendVote(nodeAddress string) {
 		nodeAddress)
 }
 
-func requestVotes(endRequestingVote chan bool, hasVoted map[string]bool) {
-	onRequestingVote := true
-	for onRequestingVote {
-		for _, nodeAddress := range nodeAddresses {
-			if _, voted := hasVoted[nodeAddress]; !voted && nodeAddress != CURRENT_ADDRESS {
-				requestVote(nodeAddress)
-			}
-		}
-		select {
-		case <-endRequestingVote:
-			onRequestingVote = false
-		case <-time.After(REQUEST_VOTE_INTERVAL):
+func requestVotes(hasVoted map[string]bool) {
+	for _, nodeAddress := range nodeAddresses {
+		if _, voted := hasVoted[nodeAddress]; !voted && nodeAddress != CURRENT_ADDRESS {
+			requestVote(nodeAddress)
 		}
 	}
 }
 
 func startNewElectionTerm(electionResult chan bool) {
 	currentTerm++
-	endRequestingVote := make(chan bool)
 	hasVoted := make(map[string]bool)
 	hasVoted[CURRENT_ADDRESS] = true
-	go requestVotes(endRequestingVote, hasVoted)
+	go requestVotes(hasVoted)
 	onCollectingVotes := true
 	for onCollectingVotes {
 		select {
 		case <-cancelElection:
 			onCollectingVotes = false
-			endRequestingVote <- true
 			electionResult <- false
 		case voterAddress := <-registerVote:
 			hasVoted[voterAddress] = true
 		case <-time.After(randomDuration(ELECTION_TIME_LIMIT_MIN, ELECTION_TIME_LIMIT_MAX)):
 			defer startNewElectionTerm(electionResult)
 			onCollectingVotes = false
-			endRequestingVote <- true
 		}
 		if len(hasVoted) >= len(nodeAddresses)/2+1 {
 			currentNodeState = LEADER
 			onCollectingVotes = false
-			endRequestingVote <- true
 			electionResult <- true
 		}
 	}
