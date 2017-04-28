@@ -44,7 +44,7 @@ const (
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "192.168.1.27:5556"
+	CURRENT_ADDRESS         = "192.168.1.10:5556"
 	LOG_FILENAME            = "logs.txt"
 	NODES_FILENAME = "nodes.txt"
 )
@@ -332,14 +332,14 @@ func ReadAllLogFromFile() {
 			return
 		}
 		workerLogs = append(workerLogs, entry)
-		CommitLog(entry)
+		CommitLogWithoutAppend(entry)
 	}
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func CommitLog(log Log) {
+func CommitLogWithoutAppend(log Log) {
 	switch log.Command {
 	case ADD:
 		loadBalancer.Add(log.Worker)
@@ -351,7 +351,10 @@ func CommitLog(log Log) {
 	if log.Id > commitIndex {
 		commitIndex = log.Id
 	}
+}
 
+func CommitLog(log Log) {
+	CommitLogWithoutAppend(log)
 	AppendToFile(log)
 }
 
