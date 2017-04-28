@@ -138,6 +138,7 @@ type Log struct {
 }
 
 var workerLogs = []Log{}
+var lastLogIndex = 0
 
 type WorkerMessage struct {
 	Port            int `json:"PORTDAEMON"`
@@ -248,10 +249,8 @@ func (l *LoadBalancer) IsEmpty() bool {
 
 func (l LoadBalancer) GetMinLoad() Worker {
 	l.RLock()
-	for time.Now().Sub(l.workerHeap.Top().lastUpdateTime) > WORKER_TIME_LIMIT {
-		l.RUnlock()
-		l.Delete(l.workerHeap.Top().worker.address)
-		l.RLock()
+	if time.Now().Sub(l.workerHeap.Top().lastUpdateTime) > WORKER_TIME_LIMIT {
+		AddLog(DEL, l.workerHeap.Top().worker)
 	}
 	worker := l.workerHeap.Top().worker
 	l.RUnlock()
@@ -269,8 +268,27 @@ func CreateLoadBalancer() LoadBalancer {
 var loadBalancer LoadBalancer = CreateLoadBalancer()
 
 func AddLog(commandType CommandType, worker Worker) {
+	workerLogs = append(workerLogs, Log{
+		Worker:worker,
+		Term:currentTerm,
+		Command:commandType,
+		Id:lastLogIndex})
+}
 
-	workerLogs = append(workerLogs, Log{})
+func PrintToFile(log Log) {
+
+}
+
+func CommitLog(log Log) {
+	switch log.Command {
+	case ADD:
+		loadBalancer.Add(log.Worker)
+	case DEL:
+		loadBalancer.Delete(log.Worker.address)
+	case UPD:
+		loadBalancer.Update(log.Worker.address, log.Worker.cpuLoad)
+	}
+	PrintToFile(log)
 }
 
 func HandleWorkerConn(buf []byte, n int) {
@@ -285,13 +303,12 @@ func HandleWorkerConn(buf []byte, n int) {
 		return
 	}
 	if !loadBalancer.Exist(workerAddress) {
-
 		worker := Worker{
 			msg.CpuLoad,
 			workerAddress}
-		loadBalancer.Add(worker)
+		AddLog(ADD, worker)
 	} else {
-		loadBalancer.Update(workerAddress, msg.CpuLoad)
+		AddLog(ADD, Worker{address:workerAddress, cpuLoad:msg.CpuLoad})
 	}
 }
 
