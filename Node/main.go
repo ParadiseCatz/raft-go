@@ -44,9 +44,9 @@ const (
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "192.168.1.14:5556"
+	CURRENT_ADDRESS         = "192.168.1.10:5556"
 	LOG_FILENAME            = "logs.txt"
-	NODES_FILENAME = "nodes.txt"
+	NODES_FILENAME          = "nodes.txt"
 )
 
 //status message yang akan dikirim
@@ -531,7 +531,7 @@ func HandleNodeConn(buf []byte, n int) {
 		}
 
 		if msg.CommitIndex != -1 {
-			for i := commitIndex+1; i <= msg.CommitIndex; i++ {
+			for i := commitIndex + 1; i <= msg.CommitIndex; i++ {
 				CommitLog(workerLogs[i])
 			}
 			commitIndex = msg.CommitIndex
@@ -540,10 +540,10 @@ func HandleNodeConn(buf []byte, n int) {
 
 		sendNodeMessage(
 			NodeMessage{
-				Success:      true,
+				Success:         true,
 				Type:            APPEND_ENTRIES_RESPONSE,
-				PrevLogIndex: lastApplied,
-				Term: currentTerm,
+				PrevLogIndex:    lastApplied,
+				Term:            currentTerm,
 				OriginIPAddress: CURRENT_ADDRESS,
 			},
 			msg.OriginIPAddress)
@@ -798,7 +798,7 @@ func ReadAllNodesFromFile() {
 }
 
 func checkStatus() {
-	for  {
+	for {
 		switch currentNodeState {
 		case FOLLOWER:
 			log.Printf("State: Follower")
@@ -808,7 +808,7 @@ func checkStatus() {
 			log.Printf("State: Leader")
 		}
 		log.Printf("Current Term: %d", currentTerm)
-		time.Sleep(1*time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 
