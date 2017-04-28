@@ -64,6 +64,7 @@ var registerVote = make(chan string)
 var cancelElection = make(chan bool)
 var getRPC = make(chan bool)
 var grantVote = make(chan string)
+var raftRound = make(chan bool)
 var overthrowLeader = make(chan bool)
 
 //untuk JSON
@@ -416,10 +417,12 @@ func HandleNodeConn(buf []byte, n int) {
 	}
 	if currentNodeState == CANDIDATE && (msg.Term > currentTerm || (msg.Term == currentTerm && msg.IsFromLeader)) {
 		currentNodeState = FOLLOWER
+		clearBoolChannel(cancelElection)
 		cancelElection <- true
 	}
 	if currentNodeState == LEADER && msg.Term > currentTerm {
 		currentNodeState = FOLLOWER
+		clearBoolChannel(overthrowLeader)
 		overthrowLeader <- true
 	}
 
@@ -435,7 +438,13 @@ func HandleNodeConn(buf []byte, n int) {
 		}
 		if msg.Term == currentTerm && (votedFor == "" || votedFor == msg.OriginIPAddress) {
 			votedFor = msg.OriginIPAddress
-			grantVote <- msg.OriginIPAddress
+			select {
+			case grantVote <- msg.OriginIPAddress:
+			default:
+				log.Println("FULL")
+				raftRound <- true
+			}
+
 		}
 	case APPEND_ENTRIES_RESPONSE:
 		if msg.Success {
@@ -654,6 +663,7 @@ func startNewElectionTerm(electionResult chan bool) {
 		select {
 		case <-cancelElection:
 			onCollectingVotes = false
+			clearBoolChannel(electionResult)
 			electionResult <- false
 		case <-registerVote:
 			voteCount++
@@ -664,6 +674,7 @@ func startNewElectionTerm(electionResult chan bool) {
 		if voteCount >= len(nodeAddresses)/2+1 {
 			currentNodeState = LEADER
 			onCollectingVotes = false
+			clearBoolChannel(electionResult)
 			electionResult <- true
 		}
 	}
@@ -719,6 +730,7 @@ func startRaft() {
 			case <-overthrowLeader:
 				currentNodeState = FOLLOWER
 			case <-time.After(HEARTBEAT_INTERVAL):
+			case <-raftRound:
 			}
 		case CANDIDATE:
 			clearBoolChannel(electionResult)
@@ -734,6 +746,7 @@ func startRaft() {
 				} else {
 					currentNodeState = FOLLOWER
 				}
+			case <-raftRound:
 			}
 		case FOLLOWER:
 			clearStringChannel(grantVote)
@@ -744,6 +757,7 @@ func startRaft() {
 			case <-time.After(randomDuration(ELECTION_TIME_LIMIT_MIN, ELECTION_TIME_LIMIT_MAX)):
 				currentNodeState = CANDIDATE
 				startNewElectionTerm(electionResult)
+			case <-raftRound:
 			}
 		}
 	}
