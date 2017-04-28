@@ -27,7 +27,7 @@ const (
 var currentNodeState = FOLLOWER
 var currentTerm = 0
 var votedFor = ""
-var nodeAddresses = []string{"192.168.0.0", "192.168.0.0"}
+var nodeAddresses = []string{}
 
 const (
 	WORKER_TIME_LIMIT       = 1 * time.Hour
@@ -42,6 +42,7 @@ const (
 	THREAD_POOL_NUM         = 3
 	CURRENT_ADDRESS         = "192.168.0.0"
 	LOG_FILENAME            = "logs.txt"
+	NODES_FILENAME = "nodes.txt"
 )
 
 type NodeMessageType int
@@ -143,8 +144,8 @@ type Log struct {
 }
 
 var workerLogs = []Log{}
-var nextIndex = make([]int, len(nodeAddresses))
-var matchIndex = make([]int, len(nodeAddresses))
+var nextIndex = []int{}
+var matchIndex = []int{}
 var lastApplied = -1
 var commitIndex = -1
 
@@ -744,6 +745,26 @@ func startRaft() {
 
 var logFile *os.File
 
+func ReadAllNodesFromFile() {
+	absPath, _ := filepath.Abs(NODES_FILENAME)
+	fmt.Println(absPath)
+	file, err := os.OpenFile(absPath, os.O_APPEND|os.O_RDONLY, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		nodeAddresses = append(nodeAddresses, scanner.Text())
+		nextIndex = append(nextIndex, 0)
+		matchIndex = append(matchIndex, -1)
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+}
+
 func main() {
 	rand.Seed(time.Now().Unix())
 	absPath, _ := filepath.Abs(LOG_FILENAME)
@@ -755,6 +776,7 @@ func main() {
 	logFile = file
 	defer logFile.Close()
 	ReadAllLogFromFile()
+	ReadAllNodesFromFile()
 	for w := 0; w < THREAD_POOL_NUM; w++ {
 		go threadPoolWorker(jobs)
 	}
