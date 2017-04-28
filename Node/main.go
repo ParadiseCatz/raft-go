@@ -569,7 +569,7 @@ func HandleClientConn(w http.ResponseWriter, r *http.Request) {
 	workerAddress := loadBalancer.GetMinLoad().Address
 	log.Println("Client Request, Redirected to " + workerAddress)
 
-	http.Redirect(w, r, "http://"+workerAddress + r.URL.Path, http.StatusFound)
+	http.Redirect(w, r, "http://"+workerAddress+r.URL.Path, http.StatusFound)
 }
 
 func ListenToWorker(ch chan bool) {
