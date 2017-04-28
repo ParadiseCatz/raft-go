@@ -34,6 +34,7 @@ const (
 	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
 	ELECTION_TIME_LIMIT_MAX = 300 * time.Millisecond
 	REQUEST_VOTE_INTERVAL   = 50 * time.Millisecond
+	HEARTBEAT_INTERVAL = 10 * time.Millisecond
 	WORKER_PORT             = ":5555"
 	NODE_PORT               = ":5556"
 	CLIENT_PORT             = ":5557"
@@ -142,7 +143,10 @@ type Log struct {
 }
 
 var workerLogs = []Log{}
-var lastLogIndex = 0
+var nextIndex = make([]int, len(nodeAddresses))
+var matchIndex = make([]int, len(nodeAddresses))
+var lastApplied = -1
+var commitIndex = -1
 
 type WorkerMessage struct {
 	Port            int `json:"PORTDAEMON"`
@@ -158,8 +162,11 @@ type NodeMessage struct {
 	IsFromLeader    bool
 	LastLogIndex    int
 	LastLogTerm     int
-	commitIndex     bool
+	CommitIndex     int
 	Entries         []Log
+	PrevLogIndex int
+	PrevLogTerm int
+	Success bool
 }
 
 type Worker struct {
@@ -273,10 +280,11 @@ var loadBalancer LoadBalancer = CreateLoadBalancer()
 
 func AddLog(commandType CommandType, worker Worker) {
 	workerLogs = append(workerLogs, Log{
-		Worker:worker,
-		Term:currentTerm,
-		Command:commandType,
-		Id:lastLogIndex})
+		Worker:  worker,
+		Term:    currentTerm,
+		Command: commandType,
+		Id:      lastApplied})
+	lastApplied++
 }
 
 func AppendToFile(log Log) {
@@ -303,7 +311,7 @@ func ReadAllLogFromFile() {
 			fmt.Println(err)
 			return
 		}
-		lastLogIndex = entry.Id
+		workerLogs = append(workerLogs, entry)
 		CommitLog(entry)
 	}
 	if err := scanner.Err(); err != nil {
@@ -320,6 +328,10 @@ func CommitLog(log Log) {
 	case UPD:
 		loadBalancer.Update(log.Worker.Address, log.Worker.CpuLoad)
 	}
+	if log.Id > commitIndex {
+		commitIndex = log.Id
+	}
+
 	AppendToFile(log)
 }
 
@@ -341,6 +353,36 @@ func HandleWorkerConn(buf []byte, n int) {
 		AddLog(ADD, worker)
 	} else {
 		AddLog(ADD, Worker{Address: workerAddress, CpuLoad: msg.CpuLoad})
+	}
+}
+
+func getMajorityMatchIndex() int {
+	freqMap := map[int]int{}
+	for _, mi := range matchIndex {
+		freqMap[mi]++
+	}
+	for index, freq := range freqMap {
+		if freq > len(matchIndex) /2 {
+			return index
+		}
+	}
+	return commitIndex
+}
+
+func commitLeader(fromIndex int) {
+	for i := fromIndex + 1; i <= commitIndex; i++ {
+		CommitLog(workerLogs[i])
+	}
+}
+
+func checkCommitIndexMajority() {
+	defer commitLeader(commitIndex)
+	upper := getMajorityMatchIndex()
+	for i := commitIndex + 1; i < upper; i++ {
+		if workerLogs[i].Term != currentTerm {
+			return
+		}
+		commitIndex = i
 	}
 }
 
@@ -375,8 +417,110 @@ func HandleNodeConn(buf []byte, n int) {
 			grantVote <- msg.OriginIPAddress
 		}
 	case APPEND_ENTRIES_RESPONSE:
+		if msg.Success {
+			var i int = 0
+			for j, address := range nodeAddresses {
+				if address == msg.OriginIPAddress {
+					i = j
+				}
+			}
+			nextIndex[i] = msg.PrevLogIndex + 1
+			matchIndex[i] = msg.PrevLogIndex
+			checkCommitIndexMajority()
+		} else {
+			if currentTerm < msg.Term && currentNodeState == LEADER{
+				currentNodeState = FOLLOWER
+				overthrowLeader <- true
+				return
+			}
+			var sendEntries []Log
+			for j := msg.PrevLogIndex+1; j <= lastApplied; j++ {
+				sendEntries = append(sendEntries, workerLogs[j])
+			}
+			var i int = 0
+			for j, address := range nodeAddresses {
+				if address == msg.OriginIPAddress {
+					i = j
+				}
+			}
+			nextIndex[i] = msg.PrevLogIndex + 1
+			prevLogTerm := workerLogs[nextIndex[i] - 1].Term
+			sendNodeMessage(
+				NodeMessage{
+					Term:            currentTerm,
+					Type:            APPEND_ENTRIES_REQUEST,
+					IsFromLeader:    true,
+					OriginIPAddress: CURRENT_ADDRESS,
+					PrevLogIndex:    nextIndex[i] - 1,
+					PrevLogTerm:     prevLogTerm,
+					CommitIndex:     commitIndex,
+					Entries: sendEntries},
+				msg.OriginIPAddress)
+		}
 	case APPEND_ENTRIES_REQUEST:
+		getRPC <- true
+		if msg.Term < currentTerm {
+			sendResponse(false, msg.OriginIPAddress)
+			return
+		}
+		if msg.PrevLogIndex != lastApplied {
+			sendNodeMessage(
+				NodeMessage{
+					Term:            currentTerm,
+					Type:            APPEND_ENTRIES_RESPONSE,
+					OriginIPAddress: CURRENT_ADDRESS,
+					PrevLogIndex:    lastApplied,
+					Success: false,
+				},
+				msg.OriginIPAddress)
+			return
+		}
+		if lastApplied != -1 && workerLogs[lastApplied].Term != msg.PrevLogTerm {
+			lastApplied--
+			sendNodeMessage(
+				NodeMessage{
+					Term:            currentTerm,
+					Type:            APPEND_ENTRIES_RESPONSE,
+					OriginIPAddress: CURRENT_ADDRESS,
+					PrevLogIndex:    lastApplied,
+					Success: false,
+				},
+				msg.OriginIPAddress)
+			return
+		}
+
+		for _, entry := range msg.Entries {
+			if lastApplied+1 == len(workerLogs) {
+				workerLogs = append(workerLogs, entry)
+			} else {
+				workerLogs[lastApplied+1] = entry
+			}
+			lastApplied++
+		}
+
+		for i := commitIndex; i <= msg.CommitIndex; i++ {
+			CommitLog(workerLogs[i])
+		}
+		commitIndex = msg.CommitIndex
+
+		sendNodeMessage(
+			NodeMessage{
+				Success: false,
+				PrevLogIndex:lastApplied,
+			},
+			msg.OriginIPAddress)
+
 	}
+
+}
+
+func sendResponse(success bool, address string) {
+	sendNodeMessage(NodeMessage{
+		Success:success,
+		PrevLogIndex:lastApplied,
+		Term:currentTerm,
+	},
+		address)
 }
 
 func HandleClientConn(w http.ResponseWriter, r *http.Request) {
@@ -531,15 +675,43 @@ func clearStringChannel(ch chan string) {
 	}
 }
 
+func sendHeartBeat() {
+	for i, nodeAddress := range nodeAddresses {
+		var prevLogTerm int
+		if len(workerLogs) == 0 {
+			prevLogTerm = currentTerm
+		} else {
+			prevLogTerm = workerLogs[nextIndex[i] - 1].Term
+		}
+		var sendEntries []Log
+		for j := nextIndex[i]; j < lastApplied; j++ {
+			sendEntries = append(sendEntries, workerLogs[j])
+		}
+		sendNodeMessage(
+			NodeMessage{
+				Term:            currentTerm,
+				Type:            APPEND_ENTRIES_REQUEST,
+				IsFromLeader:    true,
+				OriginIPAddress: CURRENT_ADDRESS,
+				PrevLogIndex:    nextIndex[i] - 1,
+				PrevLogTerm:     prevLogTerm,
+				CommitIndex:     commitIndex,
+				Entries: sendEntries},
+			nodeAddress)
+	}
+}
+
 func startRaft() {
 	electionResult := make(chan bool)
 	for {
 		switch currentNodeState {
 		case LEADER:
+			sendHeartBeat()
 			clearBoolChannel(overthrowLeader)
 			select {
 			case <-overthrowLeader:
 				currentNodeState = FOLLOWER
+			case <-time.After(HEARTBEAT_INTERVAL):
 			}
 		case CANDIDATE:
 			clearBoolChannel(electionResult)
@@ -547,6 +719,11 @@ func startRaft() {
 			case result := <-electionResult:
 				if result == true {
 					currentNodeState = LEADER
+					for i, _ := range nextIndex {
+						nextIndex[i] = lastApplied + 1
+						matchIndex[i] = 0
+					}
+
 				} else {
 					currentNodeState = FOLLOWER
 				}
