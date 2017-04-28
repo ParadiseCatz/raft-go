@@ -38,13 +38,13 @@ const (
 	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
 	ELECTION_TIME_LIMIT_MAX = 300 * time.Millisecond
 	REQUEST_VOTE_INTERVAL   = 50 * time.Millisecond
-	HEARTBEAT_INTERVAL      = 10 * time.Millisecond
+	HEARTBEAT_INTERVAL      = 5 * time.Millisecond
 	WORKER_PORT             = ":5555"
 	NODE_PORT               = ":5556"
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "192.168.1.10:5556"
+	CURRENT_ADDRESS         = "192.168.1.14:5556"
 	LOG_FILENAME            = "logs.txt"
 	NODES_FILENAME = "nodes.txt"
 )
@@ -64,7 +64,6 @@ var registerVote = make(chan string, 5)
 var cancelElection = make(chan bool, 5)
 var getRPC = make(chan bool, 5)
 var grantVote = make(chan string, 5)
-var raftRound = make(chan bool, 5)
 var overthrowLeader = make(chan bool, 5)
 
 //untuk JSON
@@ -409,13 +408,14 @@ func checkCommitIndexMajority() {
 
 //menangani koneksi dari node lain
 func HandleNodeConn(buf []byte, n int) {
-	log.Println(string(buf))
+	// log.Println(string(buf))
 	var msg NodeMessage
 	if err := json.Unmarshal(buf[:n], &msg); err != nil {
 		fmt.Println(err)
 		return
 	}
-	if currentNodeState == CANDIDATE && (msg.Term > currentTerm || (msg.Term == currentTerm && msg.IsFromLeader)) {
+	if currentNodeState == CANDIDATE && (msg.Term > currentTerm || (msg.Term >= currentTerm && msg.IsFromLeader)) {
+		log.Println("CANCEL ELECTION")
 		currentNodeState = FOLLOWER
 		clearBoolChannel(cancelElection)
 		cancelElection <- true
@@ -438,14 +438,7 @@ func HandleNodeConn(buf []byte, n int) {
 		}
 		if msg.Term == currentTerm && (votedFor == "" || votedFor == msg.OriginIPAddress) {
 			votedFor = msg.OriginIPAddress
-			select {
-			case grantVote <- msg.OriginIPAddress:
-			default:
-				log.Println("FULL")
-				clearBoolChannel(raftRound)
-				sendVote(msg.OriginIPAddress)
-				raftRound <- true
-			}
+			grantVote <- msg.OriginIPAddress
 
 		}
 	case APPEND_ENTRIES_RESPONSE:
@@ -530,15 +523,21 @@ func HandleNodeConn(buf []byte, n int) {
 			lastApplied++
 		}
 
-		for i := commitIndex; i <= msg.CommitIndex; i++ {
-			CommitLog(workerLogs[i])
+		if msg.CommitIndex != -1{
+			for i := commitIndex+1; i <= msg.CommitIndex; i++ {
+				CommitLog(workerLogs[i])
+			}
+			commitIndex = msg.CommitIndex
 		}
-		commitIndex = msg.CommitIndex
+		currentTerm = msg.Term
 
 		sendNodeMessage(
 			NodeMessage{
-				Success:      false,
+				Success:      true,
+				Type:            APPEND_ENTRIES_RESPONSE,
 				PrevLogIndex: lastApplied,
+				Term: currentTerm,
+				OriginIPAddress: CURRENT_ADDRESS,
 			},
 			msg.OriginIPAddress)
 
@@ -627,7 +626,7 @@ func sendNodeMessage(message NodeMessage, targetAddress string) {
 			return
 		}
 		defer conn.Close()
-		log.Printf("To %s: %s\n", targetAddress, string(buffer))
+		// log.Printf("To %s: %s\n", targetAddress, string(buffer))
 		conn.Write(buffer)
 	}
 }
@@ -659,25 +658,23 @@ func startNewElectionTerm(electionResult chan bool) {
 			requestVote(nodeAddress)
 		}
 	}
-	onCollectingVotes := true
 	voteCount := 1
-	for onCollectingVotes {
+	for {
 		select {
 		case <-cancelElection:
-			onCollectingVotes = false
 			clearBoolChannel(electionResult)
 			electionResult <- false
+			return
 		case <-registerVote:
 			voteCount++
 		case <-time.After(randomDuration(ELECTION_TIME_LIMIT_MIN, ELECTION_TIME_LIMIT_MAX)):
-			defer startNewElectionTerm(electionResult)
-			onCollectingVotes = false
+			startNewElectionTerm(electionResult)
+			return
 		}
 		if voteCount >= len(nodeAddresses)/2+1 {
-			currentNodeState = LEADER
-			onCollectingVotes = false
 			clearBoolChannel(electionResult)
 			electionResult <- true
+			return
 		}
 	}
 }
@@ -722,8 +719,9 @@ func sendHeartBeat() {
 
 func startRaft() {
 	electionResult := make(chan bool)
+	threshold := 0
 	for {
-		log.Println("Raft Round")
+		// log.Println("Raft Round")
 		switch currentNodeState {
 		case LEADER:
 			sendHeartBeat()
@@ -732,13 +730,13 @@ func startRaft() {
 			case <-overthrowLeader:
 				currentNodeState = FOLLOWER
 			case <-time.After(HEARTBEAT_INTERVAL):
-			case <-raftRound:
 			}
 		case CANDIDATE:
 			clearBoolChannel(electionResult)
 			select {
 			case result := <-electionResult:
 				if result == true {
+					log.Println("Jackkkpoootttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt")
 					currentNodeState = LEADER
 					for i, _ := range nextIndex {
 						nextIndex[i] = lastApplied + 1
@@ -748,18 +746,21 @@ func startRaft() {
 				} else {
 					currentNodeState = FOLLOWER
 				}
-			case <-raftRound:
 			}
 		case FOLLOWER:
 			clearStringChannel(grantVote)
 			select {
 			case <-getRPC:
+				threshold = 0
 			case candidateIPAddress := <-grantVote:
 				sendVote(candidateIPAddress)
 			case <-time.After(randomDuration(ELECTION_TIME_LIMIT_MIN, ELECTION_TIME_LIMIT_MAX)):
-				currentNodeState = CANDIDATE
-				startNewElectionTerm(electionResult)
-			case <-raftRound:
+				if threshold > 3 {
+					currentNodeState = CANDIDATE
+					go startNewElectionTerm(electionResult)
+				} else {
+					threshold++
+				}
 			}
 		}
 	}
