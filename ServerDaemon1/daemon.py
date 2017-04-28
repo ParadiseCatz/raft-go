@@ -52,7 +52,7 @@ def sendCPUUsage():
 				print "Berhasil melakukan koneksi ke IP %s dengan port %d" %(ip_addrs[i], ports[i])
 				data = {}
 				data['IPDAEMON'] = UDP_IP_ADDR
-				data['PORTDAEMON'] = UDP_PORT
+				data['PORTDAEMON'] = 13337
 				data['CPUUSAGE'] = cpuUsage
 				data['TYPE'] = 'DAEMON'
 				message_json = json.dumps(data)
