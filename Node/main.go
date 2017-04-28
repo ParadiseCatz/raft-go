@@ -44,7 +44,7 @@ const (
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "192.168.1.14:5556"
+	CURRENT_ADDRESS         = "192.168.1.10:5556"
 	LOG_FILENAME            = "logs.txt"
 	NODES_FILENAME = "nodes.txt"
 )
@@ -483,6 +483,7 @@ func HandleNodeConn(buf []byte, n int) {
 				msg.OriginIPAddress)
 		}
 	case APPEND_ENTRIES_REQUEST:
+		clearBoolChannel(getRPC)
 		getRPC <- true
 		if msg.Term < currentTerm {
 			sendResponse(false, msg.OriginIPAddress)
@@ -523,13 +524,12 @@ func HandleNodeConn(buf []byte, n int) {
 			lastApplied++
 		}
 
-		if msg.CommitIndex != -1{
+		if msg.CommitIndex != -1 {
 			for i := commitIndex+1; i <= msg.CommitIndex; i++ {
 				CommitLog(workerLogs[i])
 			}
 			commitIndex = msg.CommitIndex
 		}
-		currentTerm = msg.Term
 
 		sendNodeMessage(
 			NodeMessage{
@@ -693,27 +693,29 @@ func clearStringChannel(ch chan string) {
 
 func sendHeartBeat() {
 	for i, nodeAddress := range nodeAddresses {
-		var prevLogTerm int
-		if len(workerLogs) == 0 {
-			prevLogTerm = currentTerm
-		} else {
-			prevLogTerm = workerLogs[nextIndex[i]-1].Term
+		if nodeAddress != CURRENT_ADDRESS {
+			var prevLogTerm int
+			if len(workerLogs) == 0 {
+				prevLogTerm = currentTerm
+			} else {
+				prevLogTerm = workerLogs[nextIndex[i]-1].Term
+			}
+			var sendEntries []Log
+			for j := nextIndex[i]; j < lastApplied; j++ {
+				sendEntries = append(sendEntries, workerLogs[j])
+			}
+			sendNodeMessage(
+				NodeMessage{
+					Term:            currentTerm,
+					Type:            APPEND_ENTRIES_REQUEST,
+					IsFromLeader:    true,
+					OriginIPAddress: CURRENT_ADDRESS,
+					PrevLogIndex:    nextIndex[i] - 1,
+					PrevLogTerm:     prevLogTerm,
+					CommitIndex:     commitIndex,
+					Entries:         sendEntries},
+				nodeAddress)
 		}
-		var sendEntries []Log
-		for j := nextIndex[i]; j < lastApplied; j++ {
-			sendEntries = append(sendEntries, workerLogs[j])
-		}
-		sendNodeMessage(
-			NodeMessage{
-				Term:            currentTerm,
-				Type:            APPEND_ENTRIES_REQUEST,
-				IsFromLeader:    true,
-				OriginIPAddress: CURRENT_ADDRESS,
-				PrevLogIndex:    nextIndex[i] - 1,
-				PrevLogTerm:     prevLogTerm,
-				CommitIndex:     commitIndex,
-				Entries:         sendEntries},
-			nodeAddress)
 	}
 }
 
