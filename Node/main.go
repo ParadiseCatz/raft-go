@@ -34,20 +34,20 @@ const (
 	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
 	ELECTION_TIME_LIMIT_MAX = 300 * time.Millisecond
 	REQUEST_VOTE_INTERVAL   = 50 * time.Millisecond
-	HEARTBEAT_INTERVAL = 10 * time.Millisecond
+	HEARTBEAT_INTERVAL      = 10 * time.Millisecond
 	WORKER_PORT             = ":5555"
 	NODE_PORT               = ":5556"
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
 	CURRENT_ADDRESS         = "192.168.0.0"
-	LOG_FILENAME = "logs.txt"
+	LOG_FILENAME            = "logs.txt"
 )
 
 type NodeMessageType int
 
 const (
-	VOTE_REQUEST  NodeMessageType = iota
+	VOTE_REQUEST            NodeMessageType = iota
 	VOTE_RESPONSE
 	APPEND_ENTRIES_REQUEST
 	APPEND_ENTRIES_RESPONSE
@@ -164,9 +164,9 @@ type NodeMessage struct {
 	LastLogTerm     int
 	CommitIndex     int
 	Entries         []Log
-	PrevLogIndex int
-	PrevLogTerm int
-	Success bool
+	PrevLogIndex    int
+	PrevLogTerm     int
+	Success         bool
 }
 
 type Worker struct {
@@ -362,7 +362,7 @@ func getMajorityMatchIndex() int {
 		freqMap[mi]++
 	}
 	for index, freq := range freqMap {
-		if freq > len(matchIndex) /2 {
+		if freq > len(matchIndex)/2 {
 			return index
 		}
 	}
@@ -428,13 +428,13 @@ func HandleNodeConn(buf []byte, n int) {
 			matchIndex[i] = msg.PrevLogIndex
 			checkCommitIndexMajority()
 		} else {
-			if currentTerm < msg.Term && currentNodeState == LEADER{
+			if currentTerm < msg.Term && currentNodeState == LEADER {
 				currentNodeState = FOLLOWER
 				overthrowLeader <- true
 				return
 			}
 			var sendEntries []Log
-			for j := msg.PrevLogIndex+1; j <= lastApplied; j++ {
+			for j := msg.PrevLogIndex + 1; j <= lastApplied; j++ {
 				sendEntries = append(sendEntries, workerLogs[j])
 			}
 			var i int = 0
@@ -444,7 +444,7 @@ func HandleNodeConn(buf []byte, n int) {
 				}
 			}
 			nextIndex[i] = msg.PrevLogIndex + 1
-			prevLogTerm := workerLogs[nextIndex[i] - 1].Term
+			prevLogTerm := workerLogs[nextIndex[i]-1].Term
 			sendNodeMessage(
 				NodeMessage{
 					Term:            currentTerm,
@@ -454,7 +454,7 @@ func HandleNodeConn(buf []byte, n int) {
 					PrevLogIndex:    nextIndex[i] - 1,
 					PrevLogTerm:     prevLogTerm,
 					CommitIndex:     commitIndex,
-					Entries: sendEntries},
+					Entries:         sendEntries},
 				msg.OriginIPAddress)
 		}
 	case APPEND_ENTRIES_REQUEST:
@@ -470,7 +470,7 @@ func HandleNodeConn(buf []byte, n int) {
 					Type:            APPEND_ENTRIES_RESPONSE,
 					OriginIPAddress: CURRENT_ADDRESS,
 					PrevLogIndex:    lastApplied,
-					Success: false,
+					Success:         false,
 				},
 				msg.OriginIPAddress)
 			return
@@ -483,7 +483,7 @@ func HandleNodeConn(buf []byte, n int) {
 					Type:            APPEND_ENTRIES_RESPONSE,
 					OriginIPAddress: CURRENT_ADDRESS,
 					PrevLogIndex:    lastApplied,
-					Success: false,
+					Success:         false,
 				},
 				msg.OriginIPAddress)
 			return
@@ -505,8 +505,8 @@ func HandleNodeConn(buf []byte, n int) {
 
 		sendNodeMessage(
 			NodeMessage{
-				Success: false,
-				PrevLogIndex:lastApplied,
+				Success:      false,
+				PrevLogIndex: lastApplied,
 			},
 			msg.OriginIPAddress)
 
@@ -516,9 +516,9 @@ func HandleNodeConn(buf []byte, n int) {
 
 func sendResponse(success bool, address string) {
 	sendNodeMessage(NodeMessage{
-		Success:success,
-		PrevLogIndex:lastApplied,
-		Term:currentTerm,
+		Success:      success,
+		PrevLogIndex: lastApplied,
+		Term:         currentTerm,
 	},
 		address)
 }
@@ -681,7 +681,7 @@ func sendHeartBeat() {
 		if len(workerLogs) == 0 {
 			prevLogTerm = currentTerm
 		} else {
-			prevLogTerm = workerLogs[nextIndex[i] - 1].Term
+			prevLogTerm = workerLogs[nextIndex[i]-1].Term
 		}
 		var sendEntries []Log
 		for j := nextIndex[i]; j < lastApplied; j++ {
@@ -696,7 +696,7 @@ func sendHeartBeat() {
 				PrevLogIndex:    nextIndex[i] - 1,
 				PrevLogTerm:     prevLogTerm,
 				CommitIndex:     commitIndex,
-				Entries: sendEntries},
+				Entries:         sendEntries},
 			nodeAddress)
 	}
 }
@@ -741,7 +741,9 @@ func startRaft() {
 		}
 	}
 }
+
 var logFile *os.File
+
 func main() {
 	rand.Seed(time.Now().Unix())
 	absPath, _ := filepath.Abs(LOG_FILENAME)
