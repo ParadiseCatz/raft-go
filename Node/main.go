@@ -607,6 +607,7 @@ func sendNodeMessage(message NodeMessage, targetAddress string) {
 			fmt.Println(err)
 			return
 		}
+		defer conn.Close()
 		conn.Write(buffer)
 	}
 }
@@ -631,32 +632,27 @@ func sendVote(nodeAddress string) {
 		nodeAddress)
 }
 
-func requestVotes(hasVoted map[string]bool) {
+func startNewElectionTerm(electionResult chan bool) {
+	currentTerm++
 	for _, nodeAddress := range nodeAddresses {
-		if _, voted := hasVoted[nodeAddress]; !voted && nodeAddress != CURRENT_ADDRESS {
+		if nodeAddress != CURRENT_ADDRESS {
 			requestVote(nodeAddress)
 		}
 	}
-}
-
-func startNewElectionTerm(electionResult chan bool) {
-	currentTerm++
-	hasVoted := make(map[string]bool)
-	hasVoted[CURRENT_ADDRESS] = true
-	go requestVotes(hasVoted)
 	onCollectingVotes := true
+	voteCount := 1
 	for onCollectingVotes {
 		select {
 		case <-cancelElection:
 			onCollectingVotes = false
 			electionResult <- false
-		case voterAddress := <-registerVote:
-			hasVoted[voterAddress] = true
+		case <-registerVote:
+			voteCount++
 		case <-time.After(randomDuration(ELECTION_TIME_LIMIT_MIN, ELECTION_TIME_LIMIT_MAX)):
 			defer startNewElectionTerm(electionResult)
 			onCollectingVotes = false
 		}
-		if len(hasVoted) >= len(nodeAddresses)/2+1 {
+		if voteCount >= len(nodeAddresses)/2+1 {
 			currentNodeState = LEADER
 			onCollectingVotes = false
 			electionResult <- true
@@ -705,6 +701,7 @@ func sendHeartBeat() {
 func startRaft() {
 	electionResult := make(chan bool)
 	for {
+		log.Println("Raft Round")
 		switch currentNodeState {
 		case LEADER:
 			sendHeartBeat()
@@ -765,8 +762,24 @@ func ReadAllNodesFromFile() {
 	}
 }
 
+func checkStatus() {
+	for  {
+		switch currentNodeState {
+		case FOLLOWER:
+			log.Printf("State: Follower")
+		case CANDIDATE:
+			log.Printf("State: Candidate")
+		case LEADER:
+			log.Printf("State: Leader")
+		}
+
+		time.Sleep(1*time.Second)
+	}
+}
+
 //main program
 func main() {
+	go checkStatus()
 	rand.Seed(time.Now().Unix())
 	absPath, _ := filepath.Abs(LOG_FILENAME)
 	fmt.Println(absPath)
