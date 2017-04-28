@@ -11,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"math/rand"
+	"path/filepath"
+	"os"
+	"bufio"
 )
 
 type NodeState int
@@ -37,6 +40,7 @@ const (
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
 	CURRENT_ADDRESS         = "192.168.0.0"
+	LOG_FILENAME = "logs.txt"
 )
 
 type NodeMessageType int
@@ -159,8 +163,8 @@ type NodeMessage struct {
 }
 
 type Worker struct {
-	cpuLoad float64
-	address string
+	CpuLoad float64
+	Address string
 }
 
 type WorkerHeapNode struct {
@@ -172,11 +176,11 @@ type WorkerHeapNode struct {
 type WorkerHeap []WorkerHeapNode
 
 func (h WorkerHeap) Len() int           { return len(h) }
-func (h WorkerHeap) Less(i, j int) bool { return h[i].worker.cpuLoad < h[j].worker.cpuLoad }
+func (h WorkerHeap) Less(i, j int) bool { return h[i].worker.CpuLoad < h[j].worker.CpuLoad }
 func (h WorkerHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
-	h[i].addressMap[h[i].worker.address] = i
-	h[j].addressMap[h[j].worker.address] = j
+	h[i].addressMap[h[i].worker.Address] = i
+	h[j].addressMap[h[j].worker.Address] = j
 }
 
 func (h *WorkerHeap) Push(x interface{}) {
@@ -205,7 +209,7 @@ type LoadBalancer struct {
 
 func (l *LoadBalancer) Add(worker Worker) {
 	l.Lock()
-	l.addressMap[worker.address] = l.workerHeap.Len()
+	l.addressMap[worker.Address] = l.workerHeap.Len()
 	heap.Push(&l.workerHeap, WorkerHeapNode{worker, l.addressMap, time.Now()})
 	l.Unlock()
 }
@@ -213,7 +217,7 @@ func (l *LoadBalancer) Add(worker Worker) {
 func (l *LoadBalancer) Update(workerAddress string, workerCPULoad float64) {
 	l.Lock()
 	i := l.addressMap[workerAddress]
-	l.workerHeap[i].worker.cpuLoad = workerCPULoad
+	l.workerHeap[i].worker.CpuLoad = workerCPULoad
 	l.workerHeap[i].lastUpdateTime = time.Now()
 	heap.Fix(&l.workerHeap, i)
 	l.Unlock()
@@ -275,8 +279,36 @@ func AddLog(commandType CommandType, worker Worker) {
 		Id:lastLogIndex})
 }
 
-func PrintToFile(log Log) {
+func AppendToFile(log Log) {
+	logJson, _ := json.Marshal(log)
+	logJson = append(logJson, byte('\n'))
+	if _, err := logFile.Write(logJson); err != nil {
+		panic(err)
+	}
+}
 
+func ReadAllLogFromFile() {
+	absPath, _ := filepath.Abs(LOG_FILENAME)
+	fmt.Println(absPath)
+	file, err := os.OpenFile(absPath, os.O_APPEND|os.O_RDONLY, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var entry Log
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			fmt.Println(err)
+			return
+		}
+		lastLogIndex = entry.Id
+		CommitLog(entry)
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func CommitLog(log Log) {
@@ -284,11 +316,11 @@ func CommitLog(log Log) {
 	case ADD:
 		loadBalancer.Add(log.Worker)
 	case DEL:
-		loadBalancer.Delete(log.Worker.address)
+		loadBalancer.Delete(log.Worker.Address)
 	case UPD:
-		loadBalancer.Update(log.Worker.address, log.Worker.cpuLoad)
+		loadBalancer.Update(log.Worker.Address, log.Worker.CpuLoad)
 	}
-	PrintToFile(log)
+	AppendToFile(log)
 }
 
 func HandleWorkerConn(buf []byte, n int) {
@@ -308,7 +340,7 @@ func HandleWorkerConn(buf []byte, n int) {
 			workerAddress}
 		AddLog(ADD, worker)
 	} else {
-		AddLog(ADD, Worker{address:workerAddress, cpuLoad:msg.CpuLoad})
+		AddLog(ADD, Worker{Address: workerAddress, CpuLoad: msg.CpuLoad})
 	}
 }
 
@@ -352,7 +384,7 @@ func HandleClientConn(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Ups, no Worker :(")
 		return
 	}
-	workerAddress := loadBalancer.GetMinLoad().address
+	workerAddress := loadBalancer.GetMinLoad().Address
 	log.Println("Client Request, Redirected to " + workerAddress)
 	http.Redirect(w, r, "http://"+workerAddress, http.StatusFound)
 }
@@ -532,9 +564,18 @@ func startRaft() {
 		}
 	}
 }
-
+var logFile *os.File
 func main() {
 	rand.Seed(time.Now().Unix())
+	absPath, _ := filepath.Abs(LOG_FILENAME)
+	fmt.Println(absPath)
+	file, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		panic(err)
+	}
+	logFile = file
+	defer logFile.Close()
+	ReadAllLogFromFile()
 	for w := 0; w < THREAD_POOL_NUM; w++ {
 		go threadPoolWorker(jobs)
 	}
