@@ -788,9 +788,12 @@ func ReadAllNodesFromFile() {
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		nodeAddresses = append(nodeAddresses, scanner.Text())
-		nextIndex = append(nextIndex, 0)
-		matchIndex = append(matchIndex, -1)
+		address := scanner.Text()
+		if address != CURRENT_ADDRESS {
+			nodeAddresses = append(nodeAddresses, address)
+			nextIndex = append(nextIndex, 0)
+			matchIndex = append(matchIndex, -1)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
