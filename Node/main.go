@@ -44,7 +44,7 @@ const (
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "192.168.1.10:5556"
+	CURRENT_ADDRESS         = "192.168.1.14:5556"
 	LOG_FILENAME            = "logs.txt"
 	NODES_FILENAME = "nodes.txt"
 )
