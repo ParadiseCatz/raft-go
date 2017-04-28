@@ -375,7 +375,7 @@ func HandleWorkerConn(buf []byte, n int) {
 			workerAddress}
 		AddLog(ADD, worker)
 	} else {
-		AddLog(ADD, Worker{Address: workerAddress, CpuLoad: msg.CpuLoad})
+		AddLog(UPD, Worker{Address: workerAddress, CpuLoad: msg.CpuLoad})
 	}
 }
 
@@ -568,7 +568,8 @@ func HandleClientConn(w http.ResponseWriter, r *http.Request) {
 	}
 	workerAddress := loadBalancer.GetMinLoad().Address
 	log.Println("Client Request, Redirected to " + workerAddress)
-	http.Redirect(w, r, "http://"+workerAddress, http.StatusFound)
+
+	http.Redirect(w, r, "http://"+workerAddress + r.URL.Path, http.StatusFound)
 }
 
 func ListenToWorker(ch chan bool) {
