@@ -60,12 +60,12 @@ const (
 	UNKNOWN
 )
 
-var registerVote = make(chan string)
-var cancelElection = make(chan bool)
-var getRPC = make(chan bool)
-var grantVote = make(chan string)
-var raftRound = make(chan bool)
-var overthrowLeader = make(chan bool)
+var registerVote = make(chan string, 5)
+var cancelElection = make(chan bool, 5)
+var getRPC = make(chan bool, 5)
+var grantVote = make(chan string, 5)
+var raftRound = make(chan bool, 5)
+var overthrowLeader = make(chan bool, 5)
 
 //untuk JSON
 func (n *NodeMessageType) UnmarshalJSON(b []byte) error {
@@ -442,6 +442,8 @@ func HandleNodeConn(buf []byte, n int) {
 			case grantVote <- msg.OriginIPAddress:
 			default:
 				log.Println("FULL")
+				clearBoolChannel(raftRound)
+				sendVote(msg.OriginIPAddress)
 				raftRound <- true
 			}
 
