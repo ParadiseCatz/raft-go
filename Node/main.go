@@ -1,5 +1,6 @@
 package main
 
+//import library golang
 import (
 	"fmt"
 	"container/heap"
@@ -16,6 +17,7 @@ import (
 	"bufio"
 )
 
+//status node
 type NodeState int
 
 const (
@@ -24,15 +26,17 @@ const (
 	FOLLOWER
 )
 
+//variable global untuk tiap node
 var currentNodeState = FOLLOWER
 var currentTerm = 0
 var votedFor = ""
 var nodeAddresses = []string{}
 
+//konstanta node
 const (
 	WORKER_TIME_LIMIT       = 1 * time.Hour
-	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
-	ELECTION_TIME_LIMIT_MAX = 300 * time.Millisecond
+	ELECTION_TIME_LIMIT_MIN = 100 * time.Millisecond
+	ELECTION_TIME_LIMIT_MAX = 3 * time.Second
 	REQUEST_VOTE_INTERVAL   = 50 * time.Millisecond
 	HEARTBEAT_INTERVAL      = 10 * time.Millisecond
 	WORKER_PORT             = ":5555"
@@ -40,11 +44,12 @@ const (
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "0.0.0.0:5556"
+	CURRENT_ADDRESS         = "192.168.1.14:5556"
 	LOG_FILENAME            = "logs.txt"
 	NODES_FILENAME = "nodes.txt"
 )
 
+//status message yang akan dikirim
 type NodeMessageType int
 
 const (
@@ -61,6 +66,7 @@ var getRPC = make(chan bool)
 var grantVote = make(chan string)
 var overthrowLeader = make(chan bool)
 
+//untuk JSON
 func (n *NodeMessageType) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
@@ -92,6 +98,7 @@ func (n NodeMessageType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s)
 }
 
+//command untuk log
 type CommandType int
 
 const (
@@ -136,6 +143,7 @@ func (n CommandType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s)
 }
 
+//log entry
 type Log struct {
 	Id      int
 	Command CommandType
@@ -149,6 +157,7 @@ var matchIndex = []int{}
 var lastApplied = -1
 var commitIndex = -1
 
+//clean code sehingga code sudah cukup jelas
 type WorkerMessage struct {
 	Port            int `json:"PORTDAEMON"`
 	OriginIPAddress string `json:"IPDAEMON"`
@@ -175,6 +184,7 @@ type Worker struct {
 	Address string
 }
 
+//implementasi interface heap untuk mengambil cpu usage worker paling kecil
 type WorkerHeapNode struct {
 	worker         Worker
 	addressMap     map[string]int
@@ -209,6 +219,7 @@ func (h WorkerHeap) Top() WorkerHeapNode {
 	return h[0]
 }
 
+//untuk load balancer
 type LoadBalancer struct {
 	sync.RWMutex
 	workerHeap WorkerHeap
@@ -387,6 +398,7 @@ func checkCommitIndexMajority() {
 	}
 }
 
+//menangani koneksi dari node lain
 func HandleNodeConn(buf []byte, n int) {
 	log.Println(string(buf))
 	var msg NodeMessage
@@ -753,6 +765,7 @@ func ReadAllNodesFromFile() {
 	}
 }
 
+//main program
 func main() {
 	rand.Seed(time.Now().Unix())
 	absPath, _ := filepath.Abs(LOG_FILENAME)
