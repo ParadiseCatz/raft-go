@@ -472,7 +472,10 @@ func HandleNodeConn(buf []byte, n int) {
 				}
 			}
 			nextIndex[i] = msg.PrevLogIndex + 1
-			prevLogTerm := workerLogs[nextIndex[i]-1].Term
+			prevLogTerm := currentTerm
+			if nextIndex[i] != 0 {
+				prevLogTerm = workerLogs[nextIndex[i]-1].Term
+			}
 			sendNodeMessage(
 				NodeMessage{
 					Term:            currentTerm,
@@ -699,7 +702,7 @@ func sendHeartBeat() {
 	for i, nodeAddress := range nodeAddresses {
 		if nodeAddress != CURRENT_ADDRESS {
 			var prevLogTerm int
-			if len(workerLogs) == 0 {
+			if len(workerLogs) == 0 || nextIndex[i] == 0 {
 				prevLogTerm = currentTerm
 			} else {
 				prevLogTerm = workerLogs[nextIndex[i]-1].Term
