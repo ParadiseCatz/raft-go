@@ -35,10 +35,10 @@ var nodeAddresses = []string{}
 //konstanta node
 const (
 	WORKER_TIME_LIMIT       = 1 * time.Hour
-	ELECTION_TIME_LIMIT_MIN = 100 * time.Millisecond
-	ELECTION_TIME_LIMIT_MAX = 3 * time.Second
+	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
+	ELECTION_TIME_LIMIT_MAX = 300 * time.Millisecond
 	REQUEST_VOTE_INTERVAL   = 50 * time.Millisecond
-	HEARTBEAT_INTERVAL      = 10 * time.Millisecond
+	HEARTBEAT_INTERVAL      = 5 * time.Millisecond
 	WORKER_PORT             = ":5555"
 	NODE_PORT               = ":5556"
 	CLIENT_PORT             = ":5557"
@@ -60,11 +60,11 @@ const (
 	UNKNOWN
 )
 
-var registerVote = make(chan string)
-var cancelElection = make(chan bool)
-var getRPC = make(chan bool)
-var grantVote = make(chan string)
-var overthrowLeader = make(chan bool)
+var registerVote = make(chan string, 5)
+var cancelElection = make(chan bool, 5)
+var getRPC = make(chan bool, 5)
+var grantVote = make(chan string, 5)
+var overthrowLeader = make(chan bool, 5)
 
 //untuk JSON
 func (n *NodeMessageType) UnmarshalJSON(b []byte) error {
@@ -79,6 +79,10 @@ func (n *NodeMessageType) UnmarshalJSON(b []byte) error {
 		*n = VOTE_REQUEST
 	case "vote_response":
 		*n = VOTE_RESPONSE
+	case "append_entries_request":
+		*n = APPEND_ENTRIES_REQUEST
+	case "append_entries_response":
+		*n = APPEND_ENTRIES_RESPONSE
 	}
 
 	return nil
@@ -93,6 +97,10 @@ func (n NodeMessageType) MarshalJSON() ([]byte, error) {
 		s = "vote_request"
 	case VOTE_RESPONSE:
 		s = "vote_response"
+	case APPEND_ENTRIES_REQUEST:
+		s = "append_entries_request"
+	case APPEND_ENTRIES_RESPONSE:
+		s = "append_entries_response"
 	}
 
 	return json.Marshal(s)
@@ -400,18 +408,21 @@ func checkCommitIndexMajority() {
 
 //menangani koneksi dari node lain
 func HandleNodeConn(buf []byte, n int) {
-	log.Println(string(buf))
+	// log.Println(string(buf))
 	var msg NodeMessage
 	if err := json.Unmarshal(buf[:n], &msg); err != nil {
 		fmt.Println(err)
 		return
 	}
-	if currentNodeState == CANDIDATE && (msg.Term > currentTerm || (msg.Term == currentTerm && msg.IsFromLeader)) {
+	if currentNodeState == CANDIDATE && (msg.Term > currentTerm || (msg.Term >= currentTerm && msg.IsFromLeader)) {
+		log.Println("CANCEL ELECTION")
 		currentNodeState = FOLLOWER
+		clearBoolChannel(cancelElection)
 		cancelElection <- true
 	}
 	if currentNodeState == LEADER && msg.Term > currentTerm {
 		currentNodeState = FOLLOWER
+		clearBoolChannel(overthrowLeader)
 		overthrowLeader <- true
 	}
 
@@ -428,6 +439,7 @@ func HandleNodeConn(buf []byte, n int) {
 		if msg.Term == currentTerm && (votedFor == "" || votedFor == msg.OriginIPAddress) {
 			votedFor = msg.OriginIPAddress
 			grantVote <- msg.OriginIPAddress
+
 		}
 	case APPEND_ENTRIES_RESPONSE:
 		if msg.Success {
@@ -471,6 +483,7 @@ func HandleNodeConn(buf []byte, n int) {
 				msg.OriginIPAddress)
 		}
 	case APPEND_ENTRIES_REQUEST:
+		clearBoolChannel(getRPC)
 		getRPC <- true
 		if msg.Term < currentTerm {
 			sendResponse(false, msg.OriginIPAddress)
@@ -511,15 +524,20 @@ func HandleNodeConn(buf []byte, n int) {
 			lastApplied++
 		}
 
-		for i := commitIndex; i <= msg.CommitIndex; i++ {
-			CommitLog(workerLogs[i])
+		if msg.CommitIndex != -1 {
+			for i := commitIndex+1; i <= msg.CommitIndex; i++ {
+				CommitLog(workerLogs[i])
+			}
+			commitIndex = msg.CommitIndex
 		}
-		commitIndex = msg.CommitIndex
 
 		sendNodeMessage(
 			NodeMessage{
-				Success:      false,
+				Success:      true,
+				Type:            APPEND_ENTRIES_RESPONSE,
 				PrevLogIndex: lastApplied,
+				Term: currentTerm,
+				OriginIPAddress: CURRENT_ADDRESS,
 			},
 			msg.OriginIPAddress)
 
@@ -608,6 +626,7 @@ func sendNodeMessage(message NodeMessage, targetAddress string) {
 			return
 		}
 		defer conn.Close()
+		// log.Printf("To %s: %s\n", targetAddress, string(buffer))
 		conn.Write(buffer)
 	}
 }
@@ -639,23 +658,23 @@ func startNewElectionTerm(electionResult chan bool) {
 			requestVote(nodeAddress)
 		}
 	}
-	onCollectingVotes := true
 	voteCount := 1
-	for onCollectingVotes {
+	for {
 		select {
 		case <-cancelElection:
-			onCollectingVotes = false
+			clearBoolChannel(electionResult)
 			electionResult <- false
+			return
 		case <-registerVote:
 			voteCount++
 		case <-time.After(randomDuration(ELECTION_TIME_LIMIT_MIN, ELECTION_TIME_LIMIT_MAX)):
-			defer startNewElectionTerm(electionResult)
-			onCollectingVotes = false
+			startNewElectionTerm(electionResult)
+			return
 		}
 		if voteCount >= len(nodeAddresses)/2+1 {
-			currentNodeState = LEADER
-			onCollectingVotes = false
+			clearBoolChannel(electionResult)
 			electionResult <- true
+			return
 		}
 	}
 }
@@ -674,34 +693,37 @@ func clearStringChannel(ch chan string) {
 
 func sendHeartBeat() {
 	for i, nodeAddress := range nodeAddresses {
-		var prevLogTerm int
-		if len(workerLogs) == 0 {
-			prevLogTerm = currentTerm
-		} else {
-			prevLogTerm = workerLogs[nextIndex[i]-1].Term
+		if nodeAddress != CURRENT_ADDRESS {
+			var prevLogTerm int
+			if len(workerLogs) == 0 {
+				prevLogTerm = currentTerm
+			} else {
+				prevLogTerm = workerLogs[nextIndex[i]-1].Term
+			}
+			var sendEntries []Log
+			for j := nextIndex[i]; j < lastApplied; j++ {
+				sendEntries = append(sendEntries, workerLogs[j])
+			}
+			sendNodeMessage(
+				NodeMessage{
+					Term:            currentTerm,
+					Type:            APPEND_ENTRIES_REQUEST,
+					IsFromLeader:    true,
+					OriginIPAddress: CURRENT_ADDRESS,
+					PrevLogIndex:    nextIndex[i] - 1,
+					PrevLogTerm:     prevLogTerm,
+					CommitIndex:     commitIndex,
+					Entries:         sendEntries},
+				nodeAddress)
 		}
-		var sendEntries []Log
-		for j := nextIndex[i]; j < lastApplied; j++ {
-			sendEntries = append(sendEntries, workerLogs[j])
-		}
-		sendNodeMessage(
-			NodeMessage{
-				Term:            currentTerm,
-				Type:            APPEND_ENTRIES_REQUEST,
-				IsFromLeader:    true,
-				OriginIPAddress: CURRENT_ADDRESS,
-				PrevLogIndex:    nextIndex[i] - 1,
-				PrevLogTerm:     prevLogTerm,
-				CommitIndex:     commitIndex,
-				Entries:         sendEntries},
-			nodeAddress)
 	}
 }
 
 func startRaft() {
 	electionResult := make(chan bool)
+	threshold := 0
 	for {
-		log.Println("Raft Round")
+		// log.Println("Raft Round")
 		switch currentNodeState {
 		case LEADER:
 			sendHeartBeat()
@@ -716,6 +738,7 @@ func startRaft() {
 			select {
 			case result := <-electionResult:
 				if result == true {
+					log.Println("Jackkkpoootttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt")
 					currentNodeState = LEADER
 					for i, _ := range nextIndex {
 						nextIndex[i] = lastApplied + 1
@@ -730,11 +753,16 @@ func startRaft() {
 			clearStringChannel(grantVote)
 			select {
 			case <-getRPC:
+				threshold = 0
 			case candidateIPAddress := <-grantVote:
 				sendVote(candidateIPAddress)
 			case <-time.After(randomDuration(ELECTION_TIME_LIMIT_MIN, ELECTION_TIME_LIMIT_MAX)):
-				currentNodeState = CANDIDATE
-				startNewElectionTerm(electionResult)
+				if threshold > 3 {
+					currentNodeState = CANDIDATE
+					go startNewElectionTerm(electionResult)
+				} else {
+					threshold++
+				}
 			}
 		}
 	}
@@ -772,7 +800,7 @@ func checkStatus() {
 		case LEADER:
 			log.Printf("State: Leader")
 		}
-
+		log.Printf("Current Term: %d", currentTerm)
 		time.Sleep(1*time.Second)
 	}
 }
