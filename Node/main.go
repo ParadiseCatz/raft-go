@@ -530,6 +530,7 @@ func HandleNodeConn(buf []byte, n int) {
 			}
 			commitIndex = msg.CommitIndex
 		}
+		currentTerm = msg.Term
 
 		sendNodeMessage(
 			NodeMessage{
