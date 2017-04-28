@@ -42,9 +42,9 @@ const (
 	WORKER_PORT             = ":5555"
 	NODE_PORT               = ":5556"
 	CLIENT_PORT             = ":5557"
-	UDP_BUFFER_SIZE         = 1024
+	UDP_BUFFER_SIZE         = 1024*1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "192.168.1.10:5556"
+	CURRENT_ADDRESS         = "192.168.1.14:5556"
 	LOG_FILENAME            = "logs.txt"
 	NODES_FILENAME          = "nodes.txt"
 )
@@ -359,7 +359,7 @@ func CommitLog(log Log) {
 }
 
 func HandleWorkerConn(buf []byte, n int) {
-	log.Println(string(buf))
+	// log.Println(string(buf))
 	var msg WorkerMessage
 	if err := json.Unmarshal(buf[:n], &msg); err != nil {
 		fmt.Println(err)
@@ -532,6 +532,19 @@ func HandleNodeConn(buf []byte, n int) {
 
 		if msg.CommitIndex != -1 {
 			for i := commitIndex + 1; i <= msg.CommitIndex; i++ {
+				if i >= len(workerLogs) {
+					commitIndex = i-1
+					sendNodeMessage(
+						NodeMessage{
+							Term:            currentTerm,
+							Type:            APPEND_ENTRIES_RESPONSE,
+							OriginIPAddress: CURRENT_ADDRESS,
+							PrevLogIndex:    lastApplied,
+							Success:         false,
+						},
+						msg.OriginIPAddress)
+					return
+				}
 				CommitLog(workerLogs[i])
 			}
 			commitIndex = msg.CommitIndex
