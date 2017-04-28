@@ -35,8 +35,8 @@ var nodeAddresses = []string{}
 //konstanta node
 const (
 	WORKER_TIME_LIMIT       = 1 * time.Hour
-	ELECTION_TIME_LIMIT_MIN = 100 * time.Millisecond
-	ELECTION_TIME_LIMIT_MAX = 3 * time.Second
+	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
+	ELECTION_TIME_LIMIT_MAX = 300 * time.Millisecond
 	REQUEST_VOTE_INTERVAL   = 50 * time.Millisecond
 	HEARTBEAT_INTERVAL      = 10 * time.Millisecond
 	WORKER_PORT             = ":5555"
@@ -44,7 +44,7 @@ const (
 	CLIENT_PORT             = ":5557"
 	UDP_BUFFER_SIZE         = 1024
 	THREAD_POOL_NUM         = 3
-	CURRENT_ADDRESS         = "192.168.1.14:5556"
+	CURRENT_ADDRESS         = "192.168.1.10:5556"
 	LOG_FILENAME            = "logs.txt"
 	NODES_FILENAME = "nodes.txt"
 )
@@ -79,6 +79,10 @@ func (n *NodeMessageType) UnmarshalJSON(b []byte) error {
 		*n = VOTE_REQUEST
 	case "vote_response":
 		*n = VOTE_RESPONSE
+	case "append_entries_request":
+		*n = APPEND_ENTRIES_REQUEST
+	case "append_entries_response":
+		*n = APPEND_ENTRIES_RESPONSE
 	}
 
 	return nil
@@ -93,6 +97,10 @@ func (n NodeMessageType) MarshalJSON() ([]byte, error) {
 		s = "vote_request"
 	case VOTE_RESPONSE:
 		s = "vote_response"
+	case APPEND_ENTRIES_REQUEST:
+		s = "append_entries_request"
+	case APPEND_ENTRIES_RESPONSE:
+		s = "append_entries_response"
 	}
 
 	return json.Marshal(s)
@@ -608,6 +616,7 @@ func sendNodeMessage(message NodeMessage, targetAddress string) {
 			return
 		}
 		defer conn.Close()
+		log.Printf("To %s: %s\n", targetAddress, string(buffer))
 		conn.Write(buffer)
 	}
 }
@@ -772,7 +781,7 @@ func checkStatus() {
 		case LEADER:
 			log.Printf("State: Leader")
 		}
-
+		log.Printf("Current Term: %d", currentTerm)
 		time.Sleep(1*time.Second)
 	}
 }
