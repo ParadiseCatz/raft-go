@@ -299,12 +299,12 @@ func CreateLoadBalancer() LoadBalancer {
 var loadBalancer LoadBalancer = CreateLoadBalancer()
 
 func AddLog(commandType CommandType, worker Worker) {
+	lastApplied++
 	workerLogs = append(workerLogs, Log{
 		Worker:  worker,
 		Term:    currentTerm,
 		Command: commandType,
 		Id:      lastApplied})
-	lastApplied++
 }
 
 func AppendToFile(log Log) {
