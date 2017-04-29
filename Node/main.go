@@ -34,7 +34,7 @@ var nodeAddresses = []string{}
 
 //konstanta node
 const (
-	WORKER_TIME_LIMIT       = 1 * time.Hour
+	WORKER_TIME_LIMIT       = 10 * time.Second
 	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
 	ELECTION_TIME_LIMIT_MAX = 300 * time.Millisecond
 	REQUEST_VOTE_INTERVAL   = 50 * time.Millisecond

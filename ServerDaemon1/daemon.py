@@ -62,7 +62,7 @@ def sendCPUUsage():
 			except:
 				print "Gagal Mengirim"
 				sock.close()			
-		time.sleep(9)
+		time.sleep(2)
 
 #main program
 checkArgs()
