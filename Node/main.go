@@ -342,7 +342,11 @@ func ReadAllLogFromFile() {
 func CommitLogWithoutAppend(log Log) {
 	switch log.Command {
 	case ADD:
-		loadBalancer.Add(log.Worker)
+		if !loadBalancer.Exist(log.Worker.Address) {
+			loadBalancer.Add(log.Worker)
+		} else {
+			loadBalancer.Update(log.Worker.Address, log.Worker.CpuLoad)
+		}
 	case DEL:
 		loadBalancer.Delete(log.Worker.Address)
 	case UPD:
@@ -473,7 +477,7 @@ func HandleNodeConn(buf []byte, n int) {
 			}
 			nextIndex[i] = msg.PrevLogIndex + 1
 			prevLogTerm := currentTerm
-			if len(workerLogs) > nextIndex[i]-1 {
+			if len(workerLogs) > nextIndex[i]-1 && nextIndex[i] != 0 {
 				prevLogTerm = workerLogs[nextIndex[i]-1].Term
 			}
 			sendNodeMessage(
