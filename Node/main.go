@@ -1,6 +1,5 @@
 package main
 
-//import library golang
 import (
 	"fmt"
 	"container/heap"
@@ -17,7 +16,7 @@ import (
 	"bufio"
 )
 
-//status node
+// Node status.
 type NodeState int
 
 const (
@@ -26,13 +25,13 @@ const (
 	FOLLOWER
 )
 
-//variable global untuk tiap node
+// Global variable for all nodes.
 var currentNodeState = FOLLOWER
 var currentTerm = 0
 var votedFor = ""
 var nodeAddresses = []string{}
 
-//konstanta node
+// Node constants.
 const (
 	WORKER_TIME_LIMIT       = 10 * time.Second
 	ELECTION_TIME_LIMIT_MIN = 150 * time.Millisecond
@@ -49,7 +48,7 @@ const (
 	NODES_FILENAME          = "nodes.txt"
 )
 
-//status message yang akan dikirim
+// Message status that will be sent.
 type NodeMessageType int
 
 const (
@@ -66,7 +65,7 @@ var getRPC = make(chan bool, 5)
 var grantVote = make(chan string, 5)
 var overthrowLeader = make(chan bool, 5)
 
-//untuk JSON
+// JSON processing.
 func (n *NodeMessageType) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
@@ -106,7 +105,7 @@ func (n NodeMessageType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s)
 }
 
-//command untuk log
+// Command for logging.
 type CommandType int
 
 const (
@@ -151,7 +150,7 @@ func (n CommandType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s)
 }
 
-//log entry
+// Log entry.
 type Log struct {
 	Id      int
 	Command CommandType
@@ -165,7 +164,7 @@ var matchIndex = []int{}
 var lastApplied = -1
 var commitIndex = -1
 
-//clean code sehingga code sudah cukup jelas
+// WorkerMessage as worker message.
 type WorkerMessage struct {
 	Port            int `json:"PORTDAEMON"`
 	OriginIPAddress string `json:"IPDAEMON"`
@@ -192,7 +191,7 @@ type Worker struct {
 	Address string
 }
 
-//implementasi interface heap untuk mengambil cpu usage worker paling kecil
+// Heap interface implementation to extract CPU usage of the smallest worker.
 type WorkerHeapNode struct {
 	worker         Worker
 	addressMap     map[string]int
@@ -227,7 +226,7 @@ func (h WorkerHeap) Top() WorkerHeapNode {
 	return h[0]
 }
 
-//untuk load balancer
+// LoadBalancer.
 type LoadBalancer struct {
 	sync.RWMutex
 	workerHeap WorkerHeap
@@ -363,7 +362,6 @@ func CommitLog(log Log) {
 }
 
 func HandleWorkerConn(buf []byte, n int) {
-	// log.Println(string(buf))
 	var msg WorkerMessage
 	if err := json.Unmarshal(buf[:n], &msg); err != nil {
 		fmt.Println(err)
@@ -413,9 +411,8 @@ func checkCommitIndexMajority() {
 	}
 }
 
-//menangani koneksi dari node lain
+// Handles connection from other nodes.
 func HandleNodeConn(buf []byte, n int) {
-	// log.Println(string(buf))
 	var msg NodeMessage
 	if err := json.Unmarshal(buf[:n], &msg); err != nil {
 		fmt.Println(err)
@@ -651,7 +648,6 @@ func sendNodeMessage(message NodeMessage, targetAddress string) {
 			return
 		}
 		defer conn.Close()
-		// log.Printf("To %s: %s\n", targetAddress, string(buffer))
 		conn.Write(buffer)
 	}
 }
@@ -748,7 +744,6 @@ func startRaft() {
 	electionResult := make(chan bool)
 	threshold := 0
 	for {
-		// log.Println("Raft Round")
 		switch currentNodeState {
 		case LEADER:
 			sendHeartBeat()
@@ -763,7 +758,7 @@ func startRaft() {
 			select {
 			case result := <-electionResult:
 				if result == true {
-					log.Println("Jackkkpoootttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt")
+					log.Println("Jackpot")
 					currentNodeState = LEADER
 					for i, _ := range nextIndex {
 						nextIndex[i] = lastApplied + 1
@@ -833,7 +828,7 @@ func checkStatus() {
 	}
 }
 
-//main program
+// Main program.
 func main() {
 	go checkStatus()
 	rand.Seed(time.Now().Unix())
